@@ -1,0 +1,97 @@
+version: '3'
+
+services:
+  opensearch:
+    build:
+      context: .
+      dockerfile: Dockerfile.opensearch
+    container_name: opensearch
+    environment:
+      - cluster.name=opensearch-cluster
+      - node.name=opensearch-node
+      - cluster.initial_master_nodes=opensearch-node
+      - bootstrap.memory_lock=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - ./.volumes/opensearch:/usr/share/opensearch/data
+    networks:
+      - dashboard
+      - notebook
+      - logstash
+
+  db:
+    image: mysql:latest
+    container_name: db
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    volumes:
+      - ./.volumes/mysql/data:/var/lib/mysql
+      - ./.volumes/mysql/logs:/var/log/mysql
+      - ./.configs/mysql/initdb.d:/docker-entrypoint-initdb.d
+    networks:
+      - notebook
+      - logstash
+
+  logstash:
+    image: opensearchproject/logstash-oss-with-opensearch-output-plugin:latest
+    container_name: logstash
+    command:
+      - logstash
+      - -h
+    environment:
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    volumes:
+      - ./.configs/logstash/conf.d:/etc/logstash/conf.d
+      - ./.volumes/logstash/tracking.d:/etc/logstash/tracking.d
+    networks:
+      - logstash
+      
+  notebook:
+    image: jupyter/base-notebook:latest
+    container_name: notebook
+    command:
+      - start-notebook.sh
+      - --NotebookApp.token=''
+      - --NotebookApp.disable_check_xsrf=True
+    environment:
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - OPENSEARCH_USER=admin
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
+    ports:
+      - ${NOTEBOOK_PORT}:8888
+    volumes:
+      - ./.volumes/notebook:/home/jovyan
+    networks:
+      - notebook
+
+  dashboard:
+    image: opensearchproject/opensearch-dashboards:latest
+    container_name: dashboard
+    environment:
+      - OPENSEARCH_HOSTS=http://opensearch:9200
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - ${DASHBOARDS_PORT}:5601
+    networks:
+      - dashboard
+
+networks:
+  dashboard:
+  logstash:
+  notebook:
